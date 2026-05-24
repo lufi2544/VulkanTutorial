@@ -1,0 +1,8 @@
+
+
+
+
+- Once I finish the tutorial:
+
+	-> handle raw Wayland framework for windowing.
+
