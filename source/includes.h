@@ -6,7 +6,9 @@
 
 // .h
 #include "includes_external.h"
+#include "core.h"
 
 
 // .cpp
+#include "validation_layers.cpp"
 #include "application.cpp"
