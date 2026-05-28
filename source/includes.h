@@ -7,6 +7,8 @@
 // .h
 #include "includes_external.h"
 #include "core.h"
+#include "extensions.h"
+#include "application.h"
 
 
 // .cpp

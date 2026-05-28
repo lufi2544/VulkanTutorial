@@ -3,138 +3,6 @@
 #define HEIGHT 600
 
 
-typedef uint32_t u32;
-typedef uint8_t u8;
-
-
-#define Kilobyte(x) x * 1024
-#define Megabyte(x) Kilobyte(x) * 1024
-#define Gigabyte(x) Megabyte(x) * 1024
-
-
-internal_f u32 
-c_str_size(const char* a)
-{
-	u32 size = 0;
-	while(a[size++]);		
-	return size - 1;
-}
-
-internal_f bool
-c_str_compare(const char* _a, const char* _b)
-{
-	u8* a=(u8*)_a;
-	u8* b=(u8*)_b;
-	
-	u32 a_size = c_str_size(_a);
-	u32 b_size = c_str_size(_b);
-	
-	if(a_size != b_size)
-	{
-		return false;
-	}
-	
-	
-	for(u32 idx = 0; idx < a_size; ++idx)
-	{
-		if(a[idx] != b[idx])
-		{
-			return false;
-		}
-	}
-	
-	
-	return true;
-}
-
-global_f void
-BytesCopy(void* _s, void* _d, u32 size)
-{
-	u8* s = (u8*)_s;
-	u8* d = (u8*)_d;
-	
-	for(u32 idx = 0; idx < size; ++idx)
-	{
-		d[idx] = s[idx];
-	}
-}
-
-struct arena_t
-{
-	u8 *data;
-	u32 current;
-	u32 used;
-	u32 size;	
-};
-
-
-internal_f void*
-PushSize(arena_t *arena, u32 size)
-{
-	assert(arena->current + size < arena->size);
-	
-	u8* memory = arena->data + arena->current;
-	arena->current += size;
-	arena->used += size;
-	
-	return memory;
-}
-
-struct scratch_t
-{	
-	arena_t* parent;
-	arena_t arena;
-	u32 arena_prev;
-	
-	
-	~scratch_t()
-	{
-		parent->current = arena_prev;		
-	}
-
-};
-
-global_f void
-InitArena(arena_t *arena, u32 size, void* memory)
-{
-	arena->data = (u8*)memory;
-	arena->current = 0;
-	arena->used = 0;
-	arena->size = size;
-}
-
-
-internal_f arena_t* 
-ScratchBegin(arena_t *arena, scratch_t *scratch)
-{			
-	scratch->arena_prev = arena->current;	
-	scratch->arena.size = arena->size - arena->used;
-	scratch->arena.used = 0;
-	
-	assert(scratch->arena.size > 0);
-	
-	scratch->parent = arena;
-	
-	InitArena(&scratch->arena, arena->size - arena->used, arena->data + arena->current);
-	
-	return &scratch->arena;
-}
-
-
-
-#define SCRATCH(arena) \
-scratch_t scratch; \
-arena_t* temp_arena = ScratchBegin(arena, &scratch); \
-
-
-struct app_t
-{	
-	arena_t arena;
-	
-	GLFWwindow* window;
-	VkInstance instance;
-};
-
 internal_f void
 AppInitWindow(app_t *app)
 {
@@ -151,9 +19,25 @@ AppInitWindow(app_t *app)
 	glfwFocusWindow(app->window);
 }
 
-
 internal_f void
 AppInitVulkan(app_t *app);
+
+internal_f void
+AppInitDebugMessenger(app_t *app)
+{
+	if(!g_enableValidationLayers)
+	{
+		return;
+	}
+	
+	VkDebugUtilsMessengerCreateInfoEXT create_info{};
+	create_info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
+	create_info.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+	create_info.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
+	create_info.pfnUserCallback = DebugCallback;
+	create_info.pUserData = app;
+	
+}
 
 
 internal_f void
@@ -161,6 +45,7 @@ AppInit(app_t *app)
 {
 	// Memory Init		
 	InitArena(&app->arena, Gigabyte(1), malloc(Gigabyte(1)));	
+		
 	
 	AppInitWindow(app);
 	AppInitVulkan(app);
@@ -179,23 +64,20 @@ AppMainLoop(app_t *app)
 internal_f void 
 AppCleanUp(app_t *app)
 {
+	if(g_enableValidationLayers)
+	{
+		app->extensions_api.debug_utils_destroy(app->instance, app->debug_messenger, 0);
+	}
+	
 	vkDestroyInstance(app->instance, 0);
 	glfwDestroyWindow(app->window);
 	
 	glfwTerminate();
 }
 
-
-
-
-internal_f void
-AppCheckExtensionsAreAvailable(app_t *app, VkInstanceCreateInfo *info)
-{			
-	// Extensions, we are now using glfw for returning the extensions
-	// We would normally create an array of const char* and specify the different extensions in here.
-	// I think we can query for the compatible devices for this extensions.
-	
-	
+internal_f void 
+AppGetExtensions(arena_t *arena, const char*** out_extensions, u32 *extensions_num)
+{
 	uint32_t glfwExtensionCount = 0;
 	const char** glfwExtensions = 0;
 		
@@ -208,30 +90,60 @@ AppCheckExtensionsAreAvailable(app_t *app, VkInstanceCreateInfo *info)
 		our_extensions_size++;
 	}
 			
-	const char** our_extensions = (const char**)PushSize(&app->arena, sizeof(char*) * our_extensions_size);
+	const char** our_extensions = (const char**)PushSize(arena, sizeof(char*) * our_extensions_size);
 	
 	BytesCopy(glfwExtensions, our_extensions, sizeof(char*) * glfwExtensionCount);
 	
 	if(g_enableValidationLayers)
 	{
-		our_extensions[our_extensions_size - 1] = (const char*)PushSize(&app->arena, c_str_size(VK_EXT_DEBUG_UTILS_EXTENSION_NAME));
+		our_extensions[our_extensions_size - 1] = (const char*)PushSize(arena, c_str_size(VK_EXT_DEBUG_UTILS_EXTENSION_NAME) + 1);
 		BytesCopy(VK_EXT_DEBUG_UTILS_EXTENSION_NAME, (void*)our_extensions[our_extensions_size - 1], c_str_size(VK_EXT_DEBUG_UTILS_EXTENSION_NAME) + 1);
 		
 		printf(" PEPE: %s \n", our_extensions[our_extensions_size - 1]);
 	}
 	
+	*out_extensions = our_extensions;
+	*extensions_num = our_extensions_size;
+}
+
+
+internal_f void
+AppCheckExtensionsAreAvailable(app_t *app, VkInstanceCreateInfo *info)
+{			
+	// Extensions, we are now using glfw for returning the extensions
+	// We would normally create an array of const char* and specify the different extensions in here.
+	// I think we can query for the compatible devices for this extensions.
 	
-	uint32_t extension_count = 0;		
-	vkEnumerateInstanceExtensionProperties(NULL, &extension_count, 0);
-			
-	SCRATCH(&app->arena);
-	VkExtensionProperties* properties = (VkExtensionProperties*)PushSize(temp_arena, extension_count * sizeof(VkExtensionProperties));		
-	vkEnumerateInstanceExtensionProperties(NULL, &extension_count, properties);	
+	
+	const char** our_extensions = 0;
+	u32 our_extensions_size = 0;
+	
+	AppGetExtensions(&app->arena, &our_extensions, &our_extensions_size);
 	
 	
 	printf("\n");
 	printf("\n");
 	printf(" =============\n");
+	printf("OUR Extensions: \n");
+	printf("\n");
+	printf("\n");
+	
+	for(u32 idx = 0; idx < our_extensions_size; ++idx)
+	{
+		printf("%s \n", our_extensions[idx]);
+	}
+		
+	printf("\n");
+	printf("\n");
+	
+	
+	uint32_t extension_count = 0;		
+	vkEnumerateInstanceExtensionProperties(NULL, &extension_count, 0);
+			
+	VkExtensionProperties* properties = (VkExtensionProperties*)PushSize(&app->arena, extension_count * sizeof(VkExtensionProperties));		
+	vkEnumerateInstanceExtensionProperties(NULL, &extension_count, properties);	
+	
+	
 	printf("Compatible Extensions: \n");
 	printf("\n");
 	printf("\n");
@@ -247,12 +159,14 @@ AppCheckExtensionsAreAvailable(app_t *app, VkInstanceCreateInfo *info)
 	{
 		
 		u32 idx = 0;
-		while (idx++ < extension_count)
+		while (idx < extension_count)
 		{
 			if(c_str_compare(our_extensions[to_check_idx], properties[idx].extensionName))
 			{
 				break;
 			}
+			
+			++idx;
 		}
 		
 		// Not all the extensions are supported
@@ -350,15 +264,10 @@ VulkanCreateInstance(app_t *app)
 	create_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
 	create_info.pApplicationInfo = &app_info;
 	create_info.enabledLayerCount = 0;	
-		
+	
 	AppCheckExtensionsAreAvailable(app, &create_info);		
-	AppCheckValidationLayersAvailable(app, &create_info);
-		
-	
-	
-	
-	
-	
+	AppCheckValidationLayersAvailable(app, &create_info);	
+					
 	VkResult result = vkCreateInstance(&create_info, 0, &app->instance);
 	if(result == VK_SUCCESS)
 	{
@@ -367,6 +276,15 @@ VulkanCreateInstance(app_t *app)
 	else
 	{
 		printf(" ERROR: Vulkan instance not created correctly...  \n");
+	}
+	
+	
+	ExtensionsLoadFunctions(&app->extensions_api, &app->instance);
+	
+	
+	if(g_enableValidationLayers)
+	{
+		ValidationLayerCreateDebugMessenger(app);
 	}
 }
 
