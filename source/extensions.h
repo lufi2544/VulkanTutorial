@@ -15,8 +15,6 @@ struct extensions_api_t
 };
 
 
-
-
 internal_f void
 ExtensionsLoadFunctions(extensions_api_t *api, VkInstance *instance)
 {

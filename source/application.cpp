@@ -23,24 +23,6 @@ internal_f void
 AppInitVulkan(app_t *app);
 
 internal_f void
-AppInitDebugMessenger(app_t *app)
-{
-	if(!g_enableValidationLayers)
-	{
-		return;
-	}
-	
-	VkDebugUtilsMessengerCreateInfoEXT create_info{};
-	create_info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
-	create_info.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
-	create_info.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
-	create_info.pfnUserCallback = DebugCallback;
-	create_info.pUserData = app;
-	
-}
-
-
-internal_f void
 AppInit(app_t *app)
 {
 	// Memory Init		
@@ -57,7 +39,7 @@ AppMainLoop(app_t *app)
 	while(!glfwWindowShouldClose(app->window))
 	{
 		glfwPollEvents();
-	}		
+	}
 }
 
 
@@ -67,6 +49,11 @@ AppCleanUp(app_t *app)
 	if(g_enableValidationLayers)
 	{
 		app->extensions_api.debug_utils_destroy(app->instance, app->debug_messenger, 0);
+		
+		VkDebugUtilsMessengerCreateInfoEXT info = {};
+		ValidationLayerCreateMessengerCreateInfo(&info);
+		
+		
 	}
 	
 	vkDestroyInstance(app->instance, 0);
@@ -97,9 +84,7 @@ AppGetExtensions(arena_t *arena, const char*** out_extensions, u32 *extensions_n
 	if(g_enableValidationLayers)
 	{
 		our_extensions[our_extensions_size - 1] = (const char*)PushSize(arena, c_str_size(VK_EXT_DEBUG_UTILS_EXTENSION_NAME) + 1);
-		BytesCopy(VK_EXT_DEBUG_UTILS_EXTENSION_NAME, (void*)our_extensions[our_extensions_size - 1], c_str_size(VK_EXT_DEBUG_UTILS_EXTENSION_NAME) + 1);
-		
-		printf(" PEPE: %s \n", our_extensions[our_extensions_size - 1]);
+		BytesCopy(VK_EXT_DEBUG_UTILS_EXTENSION_NAME, (void*)our_extensions[our_extensions_size - 1], c_str_size(VK_EXT_DEBUG_UTILS_EXTENSION_NAME) + 1);		
 	}
 	
 	*out_extensions = our_extensions;
@@ -262,12 +247,20 @@ VulkanCreateInstance(app_t *app)
 	// Creation info 
 	VkInstanceCreateInfo create_info = {};
 	create_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-	create_info.pApplicationInfo = &app_info;
-	create_info.enabledLayerCount = 0;	
+	create_info.pApplicationInfo = &app_info;	
 	
 	AppCheckExtensionsAreAvailable(app, &create_info);		
 	AppCheckValidationLayersAvailable(app, &create_info);	
-					
+	
+	// Debug while creating Debug pNext
+	if(g_enableValidationLayers)
+	{			
+		VkDebugUtilsMessengerCreateInfoEXT debug_create_info = {};		
+		ValidationLayerCreateMessengerCreateInfo(&debug_create_info);		
+		create_info.pNext = &debug_create_info;
+	}
+	
+	// Create the Instance here
 	VkResult result = vkCreateInstance(&create_info, 0, &app->instance);
 	if(result == VK_SUCCESS)
 	{
@@ -279,8 +272,7 @@ VulkanCreateInstance(app_t *app)
 	}
 	
 	
-	ExtensionsLoadFunctions(&app->extensions_api, &app->instance);
-	
+	ExtensionsLoadFunctions(&app->extensions_api, &app->instance);	
 	
 	if(g_enableValidationLayers)
 	{
